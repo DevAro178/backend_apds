@@ -1,0 +1,179 @@
+from rest_framework import viewsets
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from .models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports
+from .serializers import (
+    AttachmentsSerializer, CategorySerializer, EmailsSerializer, FAQsSerializer,
+    LinksSerializer, ReportAttributesSerializer, ReportsSerializer
+)
+from rest_framework.decorators import action
+
+
+# **Emails ViewSet** - Handles CRUD operations for Emails
+class EmailsViewSet(viewsets.ModelViewSet):
+    serializer_class = EmailsSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Get all emails for the logged-in user
+    def get_queryset(self):
+        return Emails.objects.filter(user_id=self.request.user)
+
+    # Create a new email with attachments and links
+    def create(self, request, *args, **kwargs):
+        email_data = request.data
+        attachments_data = email_data.pop('attachments', [])
+        links_data = email_data.pop('links', [])
+
+        email_serializer = self.get_serializer(data=email_data)
+        email_serializer.is_valid(raise_exception=True)
+        email = email_serializer.save(user_id=request.user)
+
+        # Handle attachments
+        for attachment in attachments_data:
+            attachment['email_id'] = email.id
+            attachment_serializer = AttachmentsSerializer(data=attachment)
+            attachment_serializer.is_valid(raise_exception=True)
+            attachment_serializer.save()
+
+        # Handle links
+        for link in links_data:
+            link['email_id'] = email.id
+            link_serializer = LinksSerializer(data=link)
+            link_serializer.is_valid(raise_exception=True)
+            link_serializer.save()
+
+        return Response(email_serializer.data, status=status.HTTP_201_CREATED)
+
+    # Update email with attachments and links
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        email_data = request.data
+        attachments_data = email_data.pop('attachments', [])
+        links_data = email_data.pop('links', [])
+
+        email_serializer = self.get_serializer(instance, data=email_data, partial=True)
+        email_serializer.is_valid(raise_exception=True)
+        email_serializer.save()
+
+        # Handle attachments
+        for attachment in attachments_data:
+            attachment['email_id'] = instance.id
+            attachment_serializer = AttachmentsSerializer(data=attachment)
+            attachment_serializer.is_valid(raise_exception=True)
+            attachment_serializer.save()
+
+        # Handle links
+        for link in links_data:
+            link['email_id'] = instance.id
+            link_serializer = LinksSerializer(data=link)
+            link_serializer.is_valid(raise_exception=True)
+            link_serializer.save()
+
+        return Response(email_serializer.data)
+
+    # Delete email and related attachments and links
+    def destroy(self, request, *args, **kwargs):
+        email = self.get_object()
+        email_id = email.id
+
+        # Delete related attachments and links
+        Attachments.objects.filter(email_id=email_id).delete()
+        Links.objects.filter(email_id=email_id).delete()
+
+        return super().destroy(request, *args, **kwargs)
+
+
+# **Reports ViewSet** - Handles CRUD operations for Reports
+class ReportsViewSet(viewsets.ModelViewSet):
+    serializer_class = ReportsSerializer
+    permission_classes = [IsAuthenticated]
+
+    # Get reports filtered by email_id (requesting user's reports)
+    def get_queryset(self):
+        email_id = self.request.query_params.get('email_id')
+        if email_id:
+            return Reports.objects.filter(email_id=email_id)
+        return Reports.objects.none()
+
+    # Create a new report with associated reportAttributes
+    def create(self, request, *args, **kwargs):
+        report_data = request.data
+        report_attributes_data = report_data.pop('attributes', [])
+
+        report_serializer = self.get_serializer(data=report_data)
+        report_serializer.is_valid(raise_exception=True)
+        report = report_serializer.save()
+
+        # Handle reportAttributes
+        for attribute in report_attributes_data:
+            attribute['report_id'] = report.id
+            attribute_serializer = ReportAttributesSerializer(data=attribute)
+            attribute_serializer.is_valid(raise_exception=True)
+            attribute_serializer.save()
+
+        return Response(report_serializer.data, status=status.HTTP_201_CREATED)
+
+    # Update report with reportAttributes
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        report_data = request.data
+        report_attributes_data = report_data.pop('attributes', [])
+
+        report_serializer = self.get_serializer(instance, data=report_data, partial=True)
+        report_serializer.is_valid(raise_exception=True)
+        report_serializer.save()
+
+        # Handle reportAttributes
+        for attribute in report_attributes_data:
+            attribute['report_id'] = instance.id
+            attribute_serializer = ReportAttributesSerializer(data=attribute)
+            attribute_serializer.is_valid(raise_exception=True)
+            attribute_serializer.save()
+
+        return Response(report_serializer.data)
+
+    # Delete report and related reportAttributes
+    def destroy(self, request, *args, **kwargs):
+        report = self.get_object()
+        report_id = report.id
+
+        # Delete related reportAttributes
+        ReportAttributes.objects.filter(report_id=report_id).delete()
+
+        return super().destroy(request, *args, **kwargs)
+
+
+# **FAQs ViewSet** - Handles CRUD operations for FAQs (accessible by anyone)
+class FAQsViewSet(viewsets.ModelViewSet):
+    queryset = FAQs.objects.all()
+    serializer_class = FAQsSerializer
+    permission_classes = [AllowAny]  # Open access to FAQs
+
+
+# **Attachments ViewSet** - Handles CRUD operations for Attachments
+class AttachmentsViewSet(viewsets.ModelViewSet):
+    queryset = Attachments.objects.all()
+    serializer_class = AttachmentsSerializer
+    permission_classes = [IsAuthenticated]
+
+
+# **Category ViewSet** - Handles CRUD operations for Categories
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    permission_classes = [IsAuthenticated]
+
+
+# **Links ViewSet** - Handles CRUD operations for Links
+class LinksViewSet(viewsets.ModelViewSet):
+    queryset = Links.objects.all()
+    serializer_class = LinksSerializer
+    permission_classes = [IsAuthenticated]
+
+
+# **ReportAttributes ViewSet** - Handles CRUD operations for ReportAttributes
+class ReportAttributesViewSet(viewsets.ModelViewSet):
+    queryset = ReportAttributes.objects.all()
+    serializer_class = ReportAttributesSerializer
+    permission_classes = [IsAuthenticated]
