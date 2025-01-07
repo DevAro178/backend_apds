@@ -21,9 +21,13 @@ class EmailsViewSet(viewsets.ModelViewSet):
 
     # Create a new email with attachments and links
     def create(self, request, *args, **kwargs):
+        
         email_data = request.data
         attachments_data = email_data.pop('attachments', [])
         links_data = email_data.pop('links', [])
+        
+        # Set the user_id field to the authenticated user
+        email_data['user_id'] = request.user.id
 
         email_serializer = self.get_serializer(data=email_data)
         email_serializer.is_valid(raise_exception=True)
@@ -149,6 +153,13 @@ class FAQsViewSet(viewsets.ModelViewSet):
     queryset = FAQs.objects.all()
     serializer_class = FAQsSerializer
     permission_classes = [AllowAny]  # Open access to FAQs
+    
+    # Permission control based on HTTP method
+    def get_permissions(self):
+        if self.action == 'list' or self.action == 'retrieve':
+            # Public access for GET (list and retrieve) actions
+            return [AllowAny()]
+        return [IsAuthenticated()]  # Authenticated access for POST, PUT, DELETE
 
 
 # **Attachments ViewSet** - Handles CRUD operations for Attachments

@@ -48,9 +48,9 @@ class ReportAttributesSerializer(serializers.ModelSerializer):
 
 # Reports Serializer
 class ReportsSerializer(serializers.ModelSerializer):
-    email = EmailsSerializer(read_only=True, source='email_id')  # Nested Emails
+    # email_id = EmailsSerializer(read_only=True, source='email_id')  # Nested Emails
     attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')  # Related attributes
 
     class Meta:
         model = Reports
-        fields = ['id', 'email', 'confidence_score', 'attributes']
+        fields = ['id', 'email_id', 'confidence_score', 'attributes']
