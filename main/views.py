@@ -8,6 +8,16 @@ from .serializers import (
     LinksSerializer, ReportAttributesSerializer, ReportsSerializer
 )
 from rest_framework.decorators import action
+import os
+import json
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated  # Ensure the user is authenticated
+from django.conf import settings
 
 
 # **Emails ViewSet** - Handles CRUD operations for Emails
@@ -188,3 +198,62 @@ class ReportAttributesViewSet(viewsets.ModelViewSet):
     queryset = ReportAttributes.objects.all()
     serializer_class = ReportAttributesSerializer
     permission_classes = [IsAuthenticated]
+
+
+
+class SpamClassifierView(APIView):
+    model = None
+    tokenizer = None
+    model_path = None
+    tokenizer_path = None
+
+    permission_classes = [IsAuthenticated]  # Add this to require authentication
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Define paths for model and tokenizer
+        self.model_path = os.path.join(settings.BASE_DIR, 'trainedModelFiles/lstm_model.h5')
+        self.tokenizer_path = os.path.join(settings.BASE_DIR, 'trainedModelFiles/tokenizer.json')
+        
+        # Load model and tokenizer once during initialization
+        self.load_model_and_tokenizer()
+
+    def load_model_and_tokenizer(self):
+        try:
+            # Load the trained LSTM model
+            self.model = load_model(self.model_path)
+            print(f"Model loaded from {self.model_path}")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+
+        try:
+            # Load the tokenizer from the JSON file
+            with open(self.tokenizer_path, 'r') as json_file:
+                tokenizer_json = json.load(json_file)
+            self.tokenizer = Tokenizer.from_json(tokenizer_json)
+            print(f"Tokenizer loaded from {self.tokenizer_path}")
+        except Exception as e:
+            print(f"Error loading tokenizer: {e}")
+
+    def preprocessing(self, email_content):
+        """Preprocess email content for prediction."""
+        test_sequences = self.tokenizer.texts_to_sequences([email_content])
+        return pad_sequences(test_sequences, padding='post', maxlen=100)
+
+    def post(self, request, *args, **kwargs):
+        """Handle the POST request for spam classification."""
+        result = None
+        if request.method == "POST":
+            # Get email content from the request body
+            mail_content = request.data.get('email_content')
+            if mail_content:
+                # Preprocess the email content
+                processed_content = self.preprocessing(mail_content)
+                
+                # Predict with the model
+                prediction_result = self.model.predict(processed_content)
+                
+                # Determine if the email is spam or legitimate
+                result = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
+        
+        return Response({"result": result})
