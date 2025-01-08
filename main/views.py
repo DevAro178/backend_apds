@@ -12,6 +12,7 @@ import os
 import json
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.text import tokenizer_from_json
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from rest_framework import status
 from rest_framework.views import APIView
@@ -208,12 +209,13 @@ class SpamClassifierView(APIView):
     tokenizer_path = None
 
     permission_classes = [IsAuthenticated]  # Add this to require authentication
+    # permission_classes = [AllowAny]  # Add this to require authentication
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Define paths for model and tokenizer
-        self.model_path = os.path.join(settings.BASE_DIR, 'trainedModelFiles/lstm_model.h5')
-        self.tokenizer_path = os.path.join(settings.BASE_DIR, 'trainedModelFiles/tokenizer.json')
+        self.model_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\lstm_model.h5')
+        self.tokenizer_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\tokenizer.json')
         
         # Load model and tokenizer once during initialization
         self.load_model_and_tokenizer()
@@ -230,7 +232,7 @@ class SpamClassifierView(APIView):
             # Load the tokenizer from the JSON file
             with open(self.tokenizer_path, 'r') as json_file:
                 tokenizer_json = json.load(json_file)
-            self.tokenizer = Tokenizer.from_json(tokenizer_json)
+            self.tokenizer = tokenizer_from_json(tokenizer_json)
             print(f"Tokenizer loaded from {self.tokenizer_path}")
         except Exception as e:
             print(f"Error loading tokenizer: {e}")
@@ -239,6 +241,17 @@ class SpamClassifierView(APIView):
         """Preprocess email content for prediction."""
         test_sequences = self.tokenizer.texts_to_sequences([email_content])
         return pad_sequences(test_sequences, padding='post', maxlen=100)
+    
+    # def get(self, request, *args, **kwargs):
+    #     """Handle the GET request and return a sample string."""
+    #     # sample_string = "Congratulations! You WON the Lottery!!!."
+    #     sample_string = "How are you doing today? are you available for a call today?."
+    #     processed_content = self.preprocessing(sample_string)
+    #     # Predict with the model
+    #     prediction_result = self.model.predict(processed_content)
+    #     # Determine if the email is spam or legitimate
+    #     result = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
+    #     return Response({'Result':result}, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
         """Handle the POST request for spam classification."""
