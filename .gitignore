@@ -1,3 +1,16 @@
-venv/*
-.env
+# Virtual environment
+venv/
+Lib/
+env/
+myenv/
+Scripts/
+*.cfg
+
+# Django-generated files
 db.sqlite3
+*.pyc
+__pycache__/
+*.log
+
+# Environment variables
+.env
