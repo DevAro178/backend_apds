@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Reports, Emails, Category, FAQs, Links, Attachments, ReportAttributes
+from .models import Reports, Emails, Category, FAQs, Links, Attachments, ReportAttributes, CustomUser
 
 # Register your models here.
 admin.site.register(Reports)
@@ -9,3 +9,4 @@ admin.site.register(FAQs)
 admin.site.register(Links)
 admin.site.register(Attachments)
 admin.site.register(ReportAttributes)
+admin.site.register(CustomUser)

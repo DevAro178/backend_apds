@@ -22,7 +22,7 @@ from rest_framework import routers, serializers, viewsets
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     EmailsViewSet, ReportsViewSet, FAQsViewSet, AttachmentsViewSet, 
-    CategoryViewSet, LinksViewSet, ReportAttributesViewSet, SpamClassifierView
+    CategoryViewSet, LinksViewSet, ReportAttributesViewSet, SpamClassifierView,GoogleAuthView
 )
 
 
@@ -43,5 +43,6 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/spam-classifier/',SpamClassifierView.as_view(),name='spam-classifier'),
     path('api/', include(router.urls)),
+    path('api/auth/google', GoogleAuthView.as_view(), name='google-auth'),
     # path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
 ]

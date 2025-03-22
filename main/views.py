@@ -19,8 +19,65 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated  # Ensure the user is authenticated
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.exceptions import ObjectDoesNotExist
 
+User = get_user_model()
 
+class GoogleAuthView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+        name = request.data.get("name")
+        google_id = request.data.get("id")  # Make sure this matches the Google response
+        access_token = request.data.get("access_token")
+        profile_picture = request.data.get("picture")
+        email_verified = request.data.get("email_verified", False)
+
+        if not google_id:
+            return Response({"error": "Google ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Check if user exists by Google ID
+            user = User.objects.get(google_id=google_id)
+            created = False
+        except ObjectDoesNotExist:
+            # Ensure username is unique
+            base_username = name or f"user_{google_id[:8]}"
+            username = base_username
+            counter = 1
+            
+            # Check if the username already exists
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}_{counter}"
+                counter += 1
+
+            # Create the new user
+            user = User.objects.create(
+                email=email,
+                username=username,  # Ensure unique username
+                google_id=google_id,
+                profile_picture=profile_picture,
+                email_verified=email_verified
+            )
+            created = True
+
+        # Update access token
+        user.access_token = access_token
+        user.save()
+
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "message": "User created" if created else "User exists",
+                "access_token": str(refresh.access_token),
+                "refresh_token": str(refresh),
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 # **Emails ViewSet** - Handles CRUD operations for Emails
 class EmailsViewSet(viewsets.ModelViewSet):
     serializer_class = EmailsSerializer
