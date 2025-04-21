@@ -1,3 +1,5 @@
+import requests,base64,os,json
+from bs4 import BeautifulSoup
 from rest_framework import viewsets
 from rest_framework import status
 from rest_framework.response import Response
@@ -8,8 +10,6 @@ from main.serializers import (
     LinksSerializer, ReportAttributesSerializer, ReportsSerializer
 )
 from rest_framework.decorators import action, permission_classes
-import os
-import json
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.text import tokenizer_from_json
@@ -257,13 +257,71 @@ class SpamClassifierView(APIView):
     #     # Determine if the email is spam or legitimate
     #     result = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
     #     return Response({'Result':result}, status=status.HTTP_200_OK)
+      
+    def getEmailBodyFromResponse(self, data):
+        """
+        Extracts the email body from the Gmail API response.
+        If 'parts' is present, it selects the first part with mimeType 'text/plain'.
+        If 'parts' is not present, it retrieves the body directly from 'payload.body.data'.
+        """
+        
+        def textFromHtml(html):
+            # Parse the decoded HTML content
+            soup = BeautifulSoup(base64.urlsafe_b64decode(html).decode('utf-8'), 'html.parser')
+            
+            for script in soup(["script", "style"]):
+                script.extract()    # rip it out
+
+            # get text
+            text = soup.get_text()
+
+            # break into lines and remove leading and trailing space on each
+            lines = (line.strip() for line in text.splitlines())
+            # break multi-headlines into a line each
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            # drop blank lines
+            text = '\n'.join(chunk for chunk in chunks if chunk)
+            return text
+        try:
+            if 'parts' in data['payload']:
+                print("@@@@@@@@@@@@@")
+                for part in data['payload']['parts']:
+                    if part['mimeType'] == 'text/html':
+                        return textFromHtml(part['body']['data'])
+            else:
+                print("%%%%%%%%%%%%%%%%%%%")
+                return textFromHtml(data['payload']['body']['data'])
+        except KeyError:
+            return None
+        
+    
+    def getEmailBody(self, messageID, access_token):
+        url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageID}"
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Raise an error for HTTP error responses
+            email_data = response.json()  # Parse the response JSON
+            
+            # Decode the Base64 URL-safe encoded data
+            return self.getEmailBodyFromResponse(email_data)
+
+        except requests.exceptions.RequestException as e:
+            return {"error": str(e)}
+        except KeyError:
+            return {"error": "Invalid response format"}
+    
 
     def post(self, request, *args, **kwargs):
         """Handle the POST request for spam classification."""
         result = None
         if request.method == "POST":
             # Get email content from the request body
-            mail_content = request.data.get('email_content')
+            message_id = request.data.get('message_id')
+            mail_content=self.getEmailBody(messageID=message_id,access_token=request.user.access_token)
+            
             if mail_content:
                 # Preprocess the email content
                 processed_content = self.preprocessing(mail_content)
