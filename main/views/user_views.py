@@ -22,6 +22,9 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.exceptions import ObjectDoesNotExist
+from ..services.storeEmail import post as storeEmail
+from ..services.storeReport import post as storeReport
+from ..services.generateReport import generate as generateReport
 
 
         
@@ -39,31 +42,10 @@ class EmailsViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         
         email_data = request.data
-        attachments_data = email_data.pop('attachments', [])
-        links_data = email_data.pop('links', [])
-        
-        # Set the user_id field to the authenticated user
-        email_data['user_id'] = request.user.id
+        response=storeEmail(email_data,request.user.id)
 
-        email_serializer = self.get_serializer(data=email_data)
-        email_serializer.is_valid(raise_exception=True)
-        email = email_serializer.save(user_id=request.user)
+        return Response(response.data, status=status.HTTP_201_CREATED)
 
-        # Handle attachments
-        for attachment in attachments_data:
-            attachment['email_id'] = email.id
-            attachment_serializer = AttachmentsSerializer(data=attachment)
-            attachment_serializer.is_valid(raise_exception=True)
-            attachment_serializer.save()
-
-        # Handle links
-        for link in links_data:
-            link['email_id'] = email.id
-            link_serializer = LinksSerializer(data=link)
-            link_serializer.is_valid(raise_exception=True)
-            link_serializer.save()
-
-        return Response(email_serializer.data, status=status.HTTP_201_CREATED)
 
     # Update email with attachments and links
     def update(self, request, *args, **kwargs):
@@ -119,20 +101,9 @@ class ReportsViewSet(viewsets.ModelViewSet):
     # Create a new report with associated reportAttributes
     def create(self, request, *args, **kwargs):
         report_data = request.data
-        report_attributes_data = report_data.pop('attributes', [])
+        response=storeReport(report_data)
 
-        report_serializer = self.get_serializer(data=report_data)
-        report_serializer.is_valid(raise_exception=True)
-        report = report_serializer.save()
-
-        # Handle reportAttributes
-        for attribute in report_attributes_data:
-            attribute['report_id'] = report.id
-            attribute_serializer = ReportAttributesSerializer(data=attribute)
-            attribute_serializer.is_valid(raise_exception=True)
-            attribute_serializer.save()
-
-        return Response(report_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(response.data, status=status.HTTP_201_CREATED)
 
     # Update report with reportAttributes
     def update(self, request, *args, **kwargs):
@@ -212,6 +183,18 @@ class SpamClassifierView(APIView):
     tokenizer = None
     model_path = None
     tokenizer_path = None
+    emailStruct={
+        "title": '',
+        "body": '',
+        "category_id": 0,
+        "attachments": [],
+        "links": []
+    }
+    reportStruct={
+        "email_id": 0,
+        "confidence_score": 0,
+        "attributes": []
+    }
 
     permission_classes = [IsAuthenticated]  # Add this to require authentication
     # permission_classes = [AllowAny]  # Add this to require authentication
@@ -246,54 +229,110 @@ class SpamClassifierView(APIView):
         """Preprocess email content for prediction."""
         test_sequences = self.tokenizer.texts_to_sequences([email_content])
         return pad_sequences(test_sequences, padding='post', maxlen=100)
-    
-    # def get(self, request, *args, **kwargs):
-    #     """Handle the GET request and return a sample string."""
-    #     # sample_string = "Congratulations! You WON the Lottery!!!."
-    #     sample_string = "How are you doing today? are you available for a call today?."
-    #     processed_content = self.preprocessing(sample_string)
-    #     # Predict with the model
-    #     prediction_result = self.model.predict(processed_content)
-    #     # Determine if the email is spam or legitimate
-    #     result = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
-    #     return Response({'Result':result}, status=status.HTTP_200_OK)
+
       
+    # def getEmailBodyFromResponse(self, data):
+    #     """
+    #     Extracts the email body from the Gmail API response.
+    #     If 'parts' is present, it selects the first part with mimeType 'text/plain'.
+    #     If 'parts' is not present, it retrieves the body directly from 'payload.body.data'.
+    #     """
+        
+    #     def textFromHtml(html):
+    #         # Parse the decoded HTML content
+    #         soup = BeautifulSoup(base64.urlsafe_b64decode(html).decode('utf-8'), 'html.parser')
+            
+    #         for script in soup(["script", "style"]):
+    #             script.extract()    # rip it out
+
+    #         # get text
+    #         text = soup.get_text()
+
+    #         # break into lines and remove leading and trailing space on each
+    #         lines = (line.strip() for line in text.splitlines())
+    #         # break multi-headlines into a line each
+    #         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    #         # drop blank lines
+    #         text = '\n'.join(chunk for chunk in chunks if chunk)
+    #         return text
+    #     try:
+    #         if 'headers' in data['payload']:
+    #             for obj in data['payload']['headers']:
+    #                 if obj['name']=='Subject':
+    #                     self.emailStruct['title']=obj['value']   
+            
+    #         if 'parts' in data['payload']:
+    #             print("@@@@@@@@@@@@@")
+    #             for part in data['payload']['parts']:
+    #                 if part['mimeType'] == 'text/html':
+    #                     text=textFromHtml(part['body']['data'])
+    #                     self.emailStruct['body']=text
+    #                     return text
+    #         else:
+    #             print("%%%%%%%%%%%%%%%%%%%")
+    #             text=textFromHtml(part['body']['data'])
+    #             self.emailStruct['body']=text
+    #             return text
+    #     except KeyError:
+    #         return None
+    
+    
     def getEmailBodyFromResponse(self, data):
         """
-        Extracts the email body from the Gmail API response.
-        If 'parts' is present, it selects the first part with mimeType 'text/plain'.
-        If 'parts' is not present, it retrieves the body directly from 'payload.body.data'.
+        Extracts the email body (preferring text/html, fallback to text/plain)
+        from Gmail API message response.
         """
-        
-        def textFromHtml(html):
-            # Parse the decoded HTML content
-            soup = BeautifulSoup(base64.urlsafe_b64decode(html).decode('utf-8'), 'html.parser')
-            
+        def decode_base64(data_str):
+            try:
+                return base64.urlsafe_b64decode(data_str).decode('utf-8')
+            except Exception:
+                return ''
+
+        def text_from_html(html):
+            soup = BeautifulSoup(html, 'html.parser')
             for script in soup(["script", "style"]):
-                script.extract()    # rip it out
-
-            # get text
-            text = soup.get_text()
-
-            # break into lines and remove leading and trailing space on each
-            lines = (line.strip() for line in text.splitlines())
-            # break multi-headlines into a line each
+                script.extract()
+            lines = (line.strip() for line in soup.get_text().splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            # drop blank lines
-            text = '\n'.join(chunk for chunk in chunks if chunk)
-            return text
-        try:
-            if 'parts' in data['payload']:
-                print("@@@@@@@@@@@@@")
-                for part in data['payload']['parts']:
-                    if part['mimeType'] == 'text/html':
-                        return textFromHtml(part['body']['data'])
-            else:
-                print("%%%%%%%%%%%%%%%%%%%")
-                return textFromHtml(data['payload']['body']['data'])
-        except KeyError:
+            return '\n'.join(chunk for chunk in chunks if chunk)
+
+        def extract_parts(payload):
+            if 'parts' in payload:
+                for part in payload['parts']:
+                    if part.get('mimeType') == 'text/html':
+                        html = decode_base64(part['body'].get('data', ''))
+                        return text_from_html(html)
+                    elif part.get('mimeType') == 'text/plain':
+                        return decode_base64(part['body'].get('data', ''))
+                    elif part.get('mimeType', '').startswith('multipart'):
+                        # Recursive dive into nested multipart structures
+                        nested = extract_parts(part)
+                        if nested:
+                            return nested
+            elif payload.get('body', {}).get('data'):
+                # No parts, just one encoded body
+                content_type = payload.get('mimeType', '')
+                raw = decode_base64(payload['body']['data'])
+                return text_from_html(raw) if content_type == 'text/html' else raw
             return None
-        
+
+        try:
+            # Get subject if present
+            headers = data.get('payload', {}).get('headers', [])
+            for obj in headers:
+                if obj['name'] == 'Subject':
+                    self.emailStruct['title'] = obj.get('value', '')
+
+            # Extract content recursively
+            body = extract_parts(data['payload'])
+            if body:
+                self.emailStruct['body'] = body
+            return body
+
+        except Exception as e:
+            print(f"Error while extracting email body: {str(e)}")
+            return None
+
     
     def getEmailBody(self, messageID, access_token):
         url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageID}"
@@ -312,24 +351,78 @@ class SpamClassifierView(APIView):
             return {"error": str(e)}
         except KeyError:
             return {"error": "Invalid response format"}
+        
+    def classifyEmail(self, mail_content):
+        try:
+            # Preprocess the email content
+            processed_content = self.preprocessing(mail_content)
+            prediction_result = self.model.predict(processed_content)
+            classification = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
+
+            # Call report generation
+            reportGenerationResponse = generateReport(mail_content)
+
+            if reportGenerationResponse is not None:
+                data = json.loads(reportGenerationResponse['response'])
+                classification = data['classification']
+
+                if classification != 'spam':
+                    self.emailStruct['category_id'] = 2
+                else:
+                    self.emailStruct['category_id'] = 1
+
+                reason_points = data['reasons']
+                confidence_score = data['confidence_score']
+                self.reportStruct['confidence_score'] = confidence_score
+
+                for reason in reason_points:
+                    self.reportStruct['attributes'].append({"name": reason})
+
+                return data
+            else:
+                return None
+
+        except Exception as e:
+            # Log the error, or you can raise it to be handled where this method is called
+            print(f"Error in classifyEmail: {str(e)}")
+            return None
     
 
     def post(self, request, *args, **kwargs):
         """Handle the POST request for spam classification."""
-        result = None
-        if request.method == "POST":
-            # Get email content from the request body
+        try:
             message_id = request.data.get('message_id')
-            mail_content=self.getEmailBody(messageID=message_id,access_token=request.user.access_token)
-            
-            if mail_content:
-                # Preprocess the email content
-                processed_content = self.preprocessing(mail_content)
-                
-                # Predict with the model
-                prediction_result = self.model.predict(processed_content)
-                
-                # Determine if the email is spam or legitimate
-                result = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
+            if not message_id:
+                return Response({"status": "error", "message": "Missing message_id"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get email content using a helper method (e.g., from Gmail API)
+            mail_content = self.getEmailBody(messageID=message_id, access_token=request.user.access_token)
+
+            if not mail_content:
+                return Response({"status": "error", "message": "Failed to retrieve email content"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            self.classifyEmail(mail_content)
+
+            # Save the classified email
+            try:
+                email_data = storeEmail(self.emailStruct, request.user.id)
+            except Exception as e:
+                return Response({"status": "error", "message": f"Error saving email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Save the report
+            try:
+                self.reportStruct['email_id'] = email_data.data['id']
+                storeReport(self.reportStruct)
+            except Exception as e:
+                return Response({"status": "error", "message": f"Error saving report: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            classification = "spam" if self.emailStruct['category_id'] == 1 else "legitimate"
+            return Response({
+                "status": "success",
+                "classified": classification
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"status": "error", "message": f"Unexpected error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        return Response({"result": result})
+        
