@@ -91,11 +91,10 @@ class ReportsViewSet(viewsets.ModelViewSet):
     serializer_class = ReportsSerializer
     permission_classes = [IsAuthenticated]
 
-    # Get reports filtered by email_id (requesting user's reports)
     def get_queryset(self):
         email_id = self.request.query_params.get('email_id')
         if email_id:
-            return Reports.objects.filter(email_id=email_id)
+            return Reports.objects.filter(email_id=email_id).select_related('email_id__category_id')
         return Reports.objects.none()
 
     # Create a new report with associated reportAttributes

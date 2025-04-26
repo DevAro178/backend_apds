@@ -46,11 +46,16 @@ class ReportAttributesSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-# Reports Serializer
 class ReportsSerializer(serializers.ModelSerializer):
-    # email_id = EmailsSerializer(read_only=True, source='email_id')  # Nested Emails
-    attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')  # Related attributes
+    attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')
+    category_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Reports
-        fields = ['id', 'email_id', 'confidence_score', 'attributes']
+        fields = ['id', 'email_id', 'confidence_score', 'attributes', 'category_name']
+
+    def get_category_name(self, obj):
+        try:
+            return obj.email_id.category_id.name  # Traverses: Report → Email → Category → name
+        except AttributeError:
+            return None
