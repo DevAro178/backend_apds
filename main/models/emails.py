@@ -7,6 +7,7 @@ class Emails(models.Model):
     title = models.CharField(max_length=255)
     body = models.TextField()
     category_id = models.ForeignKey('Category', on_delete=models.CASCADE)
+    message_id=models.CharField(max_length=255)
     
     def __str__(self):
         return self.title

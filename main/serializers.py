@@ -19,10 +19,17 @@ class CategorySerializer(serializers.ModelSerializer):
 class EmailsSerializer(serializers.ModelSerializer):
     attachments = AttachmentsSerializer(many=True, read_only=True, source='attachments_set')  # Related attachments
     links = serializers.PrimaryKeyRelatedField(many=True, read_only=True, source='links_set')  # Related links
+    category_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Emails
-        fields = ['id', 'user_id', 'title', 'body', 'category_id', 'attachments', 'links']
+        fields = ['id', 'user_id', 'title', 'body', 'category_id', 'attachments', 'links','message_id','category_name']
+    
+    def get_category_name(self, obj):
+        try:
+            return obj.category_id.name  # Traverses: Report → Email → Category → name
+        except AttributeError:
+            return None
 
 
 # FAQs Serializer
@@ -47,15 +54,9 @@ class ReportAttributesSerializer(serializers.ModelSerializer):
 
 
 class ReportsSerializer(serializers.ModelSerializer):
+    email = EmailsSerializer(read_only=True, source='email_id')
     attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')
-    category_name = serializers.SerializerMethodField()
-
+    
     class Meta:
         model = Reports
-        fields = ['id', 'email_id', 'confidence_score', 'attributes', 'category_name']
-
-    def get_category_name(self, obj):
-        try:
-            return obj.email_id.category_id.name  # Traverses: Report → Email → Category → name
-        except AttributeError:
-            return None
+        fields = ['id', 'email', 'confidence_score', 'attributes']

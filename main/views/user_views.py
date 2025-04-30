@@ -25,6 +25,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from ..services.storeEmail import post as storeEmail
 from ..services.storeReport import post as storeReport
 from ..services.generateReport import generate as generateReport
+from ..services.storeEmail import getEmailBodyAgainstMessageID
 
 
         
@@ -94,8 +95,19 @@ class ReportsViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         email_id = self.request.query_params.get('email_id')
         if email_id:
-            return Reports.objects.filter(email_id=email_id).select_related('email_id__category_id')
+            return Reports.objects.filter(email_id=email_id)
         return Reports.objects.none()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+
+        # Inject 'message_id' from the related email
+        for i, report in enumerate(queryset):
+            data[i]['message_body'] = getEmailBodyAgainstMessageID(messageID=report.email_id.message_id,access_token=request.user.access_token)
+
+        return Response(data)
 
     # Create a new report with associated reportAttributes
     def create(self, request, *args, **kwargs):
@@ -404,7 +416,7 @@ class SpamClassifierView(APIView):
 
             # Save the classified email
             try:
-                email_data = storeEmail(self.emailStruct, request.user.id)
+                email_data = storeEmail(self.emailStruct, request.user.id,message_id)
             except Exception as e:
                 return Response({"status": "error", "message": f"Error saving email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
