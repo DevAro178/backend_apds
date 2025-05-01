@@ -9,6 +9,7 @@ from main.serializers import (
     AttachmentsSerializer, CategorySerializer, EmailsSerializer, FAQsSerializer,
     LinksSerializer, ReportAttributesSerializer, ReportsSerializer
 )
+from django.db.models import Count
 from rest_framework.decorators import action, permission_classes
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -199,7 +200,8 @@ class SpamClassifierView(APIView):
         "body": '',
         "category_id": 0,
         "attachments": [],
-        "links": []
+        "links": [],
+        "message_id":''
     }
     reportStruct={
         "email_id": 0,
@@ -372,7 +374,7 @@ class SpamClassifierView(APIView):
 
             # Call report generation
             reportGenerationResponse = generateReport(mail_content)
-
+        
             if reportGenerationResponse is not None:
                 data = json.loads(reportGenerationResponse['response'])
                 classification = data['classification']
@@ -385,10 +387,11 @@ class SpamClassifierView(APIView):
                 reason_points = data['reasons']
                 confidence_score = data['confidence_score']
                 self.reportStruct['confidence_score'] = confidence_score
+                self.reportStruct['attributes']=[]
 
                 for reason in reason_points:
                     self.reportStruct['attributes'].append({"name": reason})
-
+                
                 return data
             else:
                 return None
@@ -407,6 +410,7 @@ class SpamClassifierView(APIView):
                 return Response({"status": "error", "message": "Missing message_id"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Get email content using a helper method (e.g., from Gmail API)
+            self.emailStruct['message_id']=message_id
             mail_content = self.getEmailBody(messageID=message_id, access_token=request.user.access_token)
 
             if not mail_content:
@@ -416,7 +420,7 @@ class SpamClassifierView(APIView):
 
             # Save the classified email
             try:
-                email_data = storeEmail(self.emailStruct, request.user.id,message_id)
+                email_data = storeEmail(self.emailStruct, request.user.id)
             except Exception as e:
                 return Response({"status": "error", "message": f"Error saving email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -435,5 +439,34 @@ class SpamClassifierView(APIView):
 
         except Exception as e:
             return Response({"status": "error", "message": f"Unexpected error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+class DashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        # 1. Total emails
+        total_emails = Emails.objects.count()
+
+        # 2. Emails count per category
+        category_counts = Emails.objects.values('category_id__name').annotate(count=Count('id'))
+        category_data = {item['category_id__name']: item['count'] for item in category_counts}
+
+        # 3. Five most recent emails (assuming a datetime field like 'created_at')
+        recent_emails = Emails.objects.order_by('-created_at')[:5]
+        recent_data = [
+            {
+                "title": email.title,
+                "body": email.body,
+                "date": email.created_at,
+                "status": email.category_id.name if email.category_id else None
+            }
+            for email in recent_emails
+        ]
+
+        return Response({
+            "total_emails": total_emails,
+            "category_counts": category_data,
+            "recent_emails": recent_data
+        })
         
         

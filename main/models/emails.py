@@ -8,6 +8,7 @@ class Emails(models.Model):
     body = models.TextField()
     category_id = models.ForeignKey('Category', on_delete=models.CASCADE)
     message_id=models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
         return self.title

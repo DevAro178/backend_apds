@@ -23,7 +23,7 @@ class EmailsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Emails
-        fields = ['id', 'user_id', 'title', 'body', 'category_id', 'attachments', 'links','message_id','category_name']
+        fields = ['id', 'user_id', 'title', 'body', 'category_id', 'attachments', 'links','message_id','category_name','created_at']
     
     def get_category_name(self, obj):
         try:
@@ -53,10 +53,19 @@ class ReportAttributesSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+# class ReportsSerializer(serializers.ModelSerializer):
+#     email = EmailsSerializer(read_only=True, source='email_id')
+#     attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')
+    
+#     class Meta:
+#         model = Reports
+#         fields = ['id', 'email', 'confidence_score', 'attributes']
+
 class ReportsSerializer(serializers.ModelSerializer):
+    email_id = serializers.PrimaryKeyRelatedField(queryset=Emails.objects.all())
     email = EmailsSerializer(read_only=True, source='email_id')
     attributes = ReportAttributesSerializer(many=True, read_only=True, source='reportattributes_set')
-    
+
     class Meta:
         model = Reports
-        fields = ['id', 'email', 'confidence_score', 'attributes']
+        fields = ['id', 'email_id', 'email', 'confidence_score', 'attributes']
