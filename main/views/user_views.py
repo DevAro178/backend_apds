@@ -443,21 +443,27 @@ class SpamClassifierView(APIView):
         
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        # 1. Total emails
+        
+        def trim(text, limit):
+            return text if len(text) <= limit else text[:limit].rstrip() + "..."
+        
         total_emails = Emails.objects.count()
-
-        # 2. Emails count per category
         category_counts = Emails.objects.values('category_id__name').annotate(count=Count('id'))
-        category_data = {item['category_id__name']: item['count'] for item in category_counts}
-
-        # 3. Five most recent emails (assuming a datetime field like 'created_at')
+        category_summary = {
+            item['category_id__name']: {
+                "count": item['count'],
+                "percentage": round((item['count'] / total_emails) * 100, 2) if total_emails > 0 else 0
+            }
+            for item in category_counts
+        }
         recent_emails = Emails.objects.order_by('-created_at')[:5]
         recent_data = [
             {
-                "title": email.title,
-                "body": email.body,
-                "date": email.created_at,
+                "title": trim(email.title, 10),
+                "body": trim(email.body, 20),
+                "date": email.created_at.strftime("%B %d, %Y"),
                 "status": email.category_id.name if email.category_id else None
             }
             for email in recent_emails
@@ -465,8 +471,6 @@ class DashboardView(APIView):
 
         return Response({
             "total_emails": total_emails,
-            "category_counts": category_data,
+            "category_summary": category_summary,
             "recent_emails": recent_data
         })
-        
-        
