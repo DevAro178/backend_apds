@@ -1,5 +1,7 @@
 import requests,base64,os,json
 from bs4 import BeautifulSoup
+from django.db.models.functions import TruncDate
+from collections import defaultdict
 from rest_framework import viewsets
 from rest_framework import status
 from rest_framework.response import Response
@@ -450,6 +452,8 @@ class DashboardView(APIView):
             return text if len(text) <= limit else text[:limit].rstrip() + "..."
         
         total_emails = Emails.objects.count()
+
+        # Category summary with percentages
         category_counts = Emails.objects.values('category_id__name').annotate(count=Count('id'))
         category_summary = {
             item['category_id__name']: {
@@ -458,19 +462,47 @@ class DashboardView(APIView):
             }
             for item in category_counts
         }
+
+        # Recent emails
         recent_emails = Emails.objects.order_by('-created_at')[:5]
         recent_data = [
             {
-                "title": trim(email.title, 10),
-                "body": trim(email.body, 20),
+                "title": trim(email.title,50),
+                "body": trim(email.body,100),
                 "date": email.created_at.strftime("%B %d, %Y"),
                 "status": email.category_id.name if email.category_id else None
             }
             for email in recent_emails
         ]
 
+        # Line chart data: count of emails per category per day
+        email_counts = Emails.objects.annotate(date=TruncDate('created_at')).values('date', 'category_id__name').annotate(count=Count('id'))
+
+        chart_data = defaultdict(list)
+        for item in email_counts:
+            chart_data[item['category_id__name']].append({
+                "x": item['date'].isoformat(),
+                "y": item['count']
+            })
+
+        # Add default colors if needed
+        category_colors = {
+            "Spam": "#3b82f6",         # blueAccent
+            "Legitimate": "#22c55e"    # greenAccent
+        }
+
+        line_chart = [
+            {
+                "id": category,
+                "color": category_colors.get(category, "#888"),
+                "data": sorted(data, key=lambda x: x["x"])  # Ensure chronological order
+            }
+            for category, data in chart_data.items()
+        ]
+
         return Response({
             "total_emails": total_emails,
             "category_summary": category_summary,
-            "recent_emails": recent_data
+            "recent_emails": recent_data,
+            "line_chart": line_chart
         })
