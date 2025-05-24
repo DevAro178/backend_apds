@@ -213,6 +213,7 @@ class SpamClassifierView(APIView):
 
     permission_classes = [IsAuthenticated]  # Add this to require authentication
     # permission_classes = [AllowAny]  # Add this to require authentication
+    serializer_class = EmailsSerializer
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -413,27 +414,34 @@ class SpamClassifierView(APIView):
 
             # Get email content using a helper method (e.g., from Gmail API)
             self.emailStruct['message_id']=message_id
-            mail_content = self.getEmailBody(messageID=message_id, access_token=request.user.access_token)
+            
+            email = Emails.objects.filter(message_id=message_id, user_id=request.user.id).first()
+            if email:
+                serializer = self.serializer_class(email)
+                self.emailStruct['category_id']=serializer['category_id']
+            else:
+                mail_content = self.getEmailBody(messageID=message_id, access_token=request.user.access_token)
 
-            if not mail_content:
-                return Response({"status": "error", "message": "Failed to retrieve email content"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                if not mail_content:
+                    return Response({"status": "error", "message": "Failed to retrieve email content"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            self.classifyEmail(mail_content)
+                self.classifyEmail(mail_content)
 
-            # Save the classified email
-            try:
-                email_data = storeEmail(self.emailStruct, request.user.id)
-            except Exception as e:
-                return Response({"status": "error", "message": f"Error saving email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # Save the classified email
+                try:
+                    email_data = storeEmail(self.emailStruct, request.user.id)
+                except Exception as e:
+                    return Response({"status": "error", "message": f"Error saving email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # Save the report
-            try:
-                self.reportStruct['email_id'] = email_data.data['id']
-                storeReport(self.reportStruct)
-            except Exception as e:
-                return Response({"status": "error", "message": f"Error saving report: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # Save the report
+                try:
+                    self.reportStruct['email_id'] = email_data.data['id']
+                    storeReport(self.reportStruct)
+                except Exception as e:
+                    return Response({"status": "error", "message": f"Error saving report: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             classification = "spam" if self.emailStruct['category_id'] == 1 else "legitimate"
+                
             return Response({
                 "status": "success",
                 "classified": classification
