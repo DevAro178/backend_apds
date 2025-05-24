@@ -1,4 +1,4 @@
-import requests,base64,os,json
+import requests,base64,os,json,pickle
 from bs4 import BeautifulSoup
 from django.db.models.functions import TruncDate
 from collections import defaultdict
@@ -218,12 +218,14 @@ class SpamClassifierView(APIView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Define paths for model and tokenizer
-        self.model_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\lstm_model.h5')
-        self.tokenizer_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\tokenizer.json')
+        self.model_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\phishing_model.h5')
+        self.tokenizer_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\tokenizer.pkl')
+        # self.tokenizer_path = os.path.join(settings.BASE_DIR, 'main\\trainedModelFiles\\tokenizer.json')
         
         # Load model and tokenizer once during initialization
         self.load_model_and_tokenizer()
 
+    
     def load_model_and_tokenizer(self):
         try:
             # Load the trained LSTM model
@@ -233,10 +235,9 @@ class SpamClassifierView(APIView):
             print(f"Error loading model: {e}")
 
         try:
-            # Load the tokenizer from the JSON file
-            with open(self.tokenizer_path, 'r') as json_file:
-                tokenizer_json = json.load(json_file)
-            self.tokenizer = tokenizer_from_json(tokenizer_json)
+            # Load the tokenizer from a pickle (.pkl) file
+            with open(self.tokenizer_path, 'rb') as handle:
+                self.tokenizer = pickle.load(handle)
             print(f"Tokenizer loaded from {self.tokenizer_path}")
         except Exception as e:
             print(f"Error loading tokenizer: {e}")
@@ -245,53 +246,6 @@ class SpamClassifierView(APIView):
         """Preprocess email content for prediction."""
         test_sequences = self.tokenizer.texts_to_sequences([email_content])
         return pad_sequences(test_sequences, padding='post', maxlen=100)
-
-      
-    # def getEmailBodyFromResponse(self, data):
-    #     """
-    #     Extracts the email body from the Gmail API response.
-    #     If 'parts' is present, it selects the first part with mimeType 'text/plain'.
-    #     If 'parts' is not present, it retrieves the body directly from 'payload.body.data'.
-    #     """
-        
-    #     def textFromHtml(html):
-    #         # Parse the decoded HTML content
-    #         soup = BeautifulSoup(base64.urlsafe_b64decode(html).decode('utf-8'), 'html.parser')
-            
-    #         for script in soup(["script", "style"]):
-    #             script.extract()    # rip it out
-
-    #         # get text
-    #         text = soup.get_text()
-
-    #         # break into lines and remove leading and trailing space on each
-    #         lines = (line.strip() for line in text.splitlines())
-    #         # break multi-headlines into a line each
-    #         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-    #         # drop blank lines
-    #         text = '\n'.join(chunk for chunk in chunks if chunk)
-    #         return text
-    #     try:
-    #         if 'headers' in data['payload']:
-    #             for obj in data['payload']['headers']:
-    #                 if obj['name']=='Subject':
-    #                     self.emailStruct['title']=obj['value']   
-            
-    #         if 'parts' in data['payload']:
-    #             print("@@@@@@@@@@@@@")
-    #             for part in data['payload']['parts']:
-    #                 if part['mimeType'] == 'text/html':
-    #                     text=textFromHtml(part['body']['data'])
-    #                     self.emailStruct['body']=text
-    #                     return text
-    #         else:
-    #             print("%%%%%%%%%%%%%%%%%%%")
-    #             text=textFromHtml(part['body']['data'])
-    #             self.emailStruct['body']=text
-    #             return text
-    #     except KeyError:
-    #         return None
-    
     
     def getEmailBodyFromResponse(self, data):
         """
@@ -373,14 +327,14 @@ class SpamClassifierView(APIView):
             # Preprocess the email content
             processed_content = self.preprocessing(mail_content)
             prediction_result = self.model.predict(processed_content)
-            classification = "Spam Email" if prediction_result[0] > 0.5 else "Legitimate Email"
+            classification = "spam" if prediction_result[0] > 0.5 else "legitimate"
 
             # Call report generation
-            reportGenerationResponse = generateReport(mail_content)
+            reportGenerationResponse = generateReport(mail_content,classification)
+            print(reportGenerationResponse)
         
-            if reportGenerationResponse is not None:
+            if reportGenerationResponse is not None:    
                 data = json.loads(reportGenerationResponse['response'])
-                classification = data['classification']
 
                 if classification != 'spam':
                     self.emailStruct['category_id'] = 2
@@ -418,7 +372,7 @@ class SpamClassifierView(APIView):
             email = Emails.objects.filter(message_id=message_id, user_id=request.user.id).first()
             if email:
                 serializer = self.serializer_class(email)
-                self.emailStruct['category_id']=serializer['category_id']
+                self.emailStruct['category_id']=serializer.data['category_id']
             else:
                 mail_content = self.getEmailBody(messageID=message_id, access_token=request.user.access_token)
 
@@ -441,7 +395,7 @@ class SpamClassifierView(APIView):
                     return Response({"status": "error", "message": f"Error saving report: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             classification = "spam" if self.emailStruct['category_id'] == 1 else "legitimate"
-                
+                            
             return Response({
                 "status": "success",
                 "classified": classification
@@ -449,42 +403,75 @@ class SpamClassifierView(APIView):
 
         except Exception as e:
             return Response({"status": "error", "message": f"Unexpected error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        
+
+
 class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        
+        user = request.user
+
         def trim(text, limit):
             return text if len(text) <= limit else text[:limit].rstrip() + "..."
-        
-        total_emails = Emails.objects.count()
 
-        # Category summary with percentages
-        category_counts = Emails.objects.values('category_id__name').annotate(count=Count('id'))
-        category_summary = {
-            item['category_id__name']: {
-                "count": item['count'],
-                "percentage": round((item['count'] / total_emails) * 100, 2) if total_emails > 0 else 0
-            }
-            for item in category_counts
+        # Filter emails by authenticated user
+        user_emails = Emails.objects.filter(user_id=user.id)
+        total_emails = user_emails.count()
+
+        # Default structure
+        response_data = {
+            "total_emails": 0,
+            "category_summary": {
+                "Legitimate": {"count": 0, "percentage": 0},
+                "Spam": {"count": 0, "percentage": 0}
+            },
+            "recent_emails": [],
+            "line_chart": [
+                {
+                    "id": "Legitimate",
+                    "color": "#22c55e",
+                    "data": []
+                },
+                {
+                    "id": "Spam",
+                    "color": "#3b82f6",
+                    "data": []
+                }
+            ]
         }
 
-        # Recent emails
-        recent_emails = Emails.objects.order_by('-created_at')[:5]
-        recent_data = [
+        if total_emails == 0:
+            return Response(response_data)
+
+        # Fill category summary
+        category_counts = user_emails.values('category_id__name').annotate(count=Count('id'))
+        summary = {}
+        for item in category_counts:
+            name = item['category_id__name']
+            summary[name] = {
+                "count": item['count'],
+                "percentage": round((item['count'] / total_emails) * 100, 2)
+            }
+
+        response_data["total_emails"] = total_emails
+        response_data["category_summary"].update(summary)
+
+        # Fill recent emails
+        recent_emails = user_emails.order_by('-created_at')[:5]
+        response_data["recent_emails"] = [
             {
-                "title": trim(email.title,50),
-                "body": trim(email.body,100),
+                "title": trim(email.title, 50),
+                "body": trim(email.body, 100),
                 "date": email.created_at.strftime("%B %d, %Y"),
                 "status": email.category_id.name if email.category_id else None
             }
             for email in recent_emails
         ]
 
-        # Line chart data: count of emails per category per day
-        email_counts = Emails.objects.annotate(date=TruncDate('created_at')).values('date', 'category_id__name').annotate(count=Count('id'))
+        # Line chart data
+        email_counts = user_emails.annotate(date=TruncDate('created_at')) \
+                                  .values('date', 'category_id__name') \
+                                  .annotate(count=Count('id'))
 
         chart_data = defaultdict(list)
         for item in email_counts:
@@ -493,24 +480,9 @@ class DashboardView(APIView):
                 "y": item['count']
             })
 
-        # Add default colors if needed
-        category_colors = {
-            "Spam": "#3b82f6",         # blueAccent
-            "Legitimate": "#22c55e"    # greenAccent
-        }
+        # Update chart in response
+        for chart in response_data["line_chart"]:
+            category = chart["id"]
+            chart["data"] = sorted(chart_data.get(category, []), key=lambda x: x["x"])
 
-        line_chart = [
-            {
-                "id": category,
-                "color": category_colors.get(category, "#888"),
-                "data": sorted(data, key=lambda x: x["x"])  # Ensure chronological order
-            }
-            for category, data in chart_data.items()
-        ]
-
-        return Response({
-            "total_emails": total_emails,
-            "category_summary": category_summary,
-            "recent_emails": recent_data,
-            "line_chart": line_chart
-        })
+        return Response(response_data)
