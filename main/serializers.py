@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports
+from .models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports, domain
 
 # Attachments Serializer
 class AttachmentsSerializer(serializers.ModelSerializer):
@@ -69,3 +69,11 @@ class ReportsSerializer(serializers.ModelSerializer):
     class Meta:
         model = Reports
         fields = ['id', 'email_id', 'email', 'confidence_score', 'attributes']
+
+
+class DomainSerializer(serializers.ModelSerializer):
+    category = CategorySerializer()
+
+    class Meta:
+        model = domain
+        fields = ['name', 'category']

@@ -1,4 +1,5 @@
-import requests,base64,os,json,pickle
+import requests,base64,os,json,pickle,re
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from django.db.models.functions import TruncDate
 from collections import defaultdict
@@ -6,7 +7,7 @@ from rest_framework import viewsets
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from main.models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports
+from main.models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports,domain
 from main.serializers import (
     AttachmentsSerializer, CategorySerializer, EmailsSerializer, FAQsSerializer,
     LinksSerializer, ReportAttributesSerializer, ReportsSerializer
@@ -247,10 +248,66 @@ class SpamClassifierView(APIView):
         test_sequences = self.tokenizer.texts_to_sequences([email_content])
         return pad_sequences(test_sequences, padding='post', maxlen=100)
     
+    # def getEmailBodyFromResponse(self, data):
+    #     """
+    #     Extracts the email body (preferring text/html, fallback to text/plain)
+    #     from Gmail API message response.
+    #     """
+    #     def decode_base64(data_str):
+    #         try:
+    #             return base64.urlsafe_b64decode(data_str).decode('utf-8')
+    #         except Exception:
+    #             return ''
+
+    #     def text_from_html(html):
+    #         soup = BeautifulSoup(html, 'html.parser')
+    #         for script in soup(["script", "style"]):
+    #             script.extract()
+    #         lines = (line.strip() for line in soup.get_text().splitlines())
+    #         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    #         return '\n'.join(chunk for chunk in chunks if chunk)
+
+    #     def extract_parts(payload):
+    #         if 'parts' in payload:
+    #             for part in payload['parts']:
+    #                 if part.get('mimeType') == 'text/html':
+    #                     html = decode_base64(part['body'].get('data', ''))
+    #                     return text_from_html(html)
+    #                 elif part.get('mimeType') == 'text/plain':
+    #                     return decode_base64(part['body'].get('data', ''))
+    #                 elif part.get('mimeType', '').startswith('multipart'):
+    #                     # Recursive dive into nested multipart structures
+    #                     nested = extract_parts(part)
+    #                     if nested:
+    #                         return nested
+    #         elif payload.get('body', {}).get('data'):
+    #             # No parts, just one encoded body
+    #             content_type = payload.get('mimeType', '')
+    #             raw = decode_base64(payload['body']['data'])
+    #             return text_from_html(raw) if content_type == 'text/html' else raw
+    #         return None
+
+    #     try:
+    #         # Get subject if present
+    #         headers = data.get('payload', {}).get('headers', [])
+    #         for obj in headers:
+    #             if obj['name'] == 'Subject':
+    #                 self.emailStruct['title'] = obj.get('value', '')
+
+    #         # Extract content recursively
+    #         body = extract_parts(data['payload'])
+    #         if body:
+    #             self.emailStruct['body'] = body
+    #         return body
+
+    #     except Exception as e:
+    #         print(f"Error while extracting email body: {str(e)}")
+    #         return None
+
     def getEmailBodyFromResponse(self, data):
         """
         Extracts the email body (preferring text/html, fallback to text/plain)
-        from Gmail API message response.
+        and all domain names (no http/https or paths) from URLs inside the body.
         """
         def decode_base64(data_str):
             try:
@@ -275,34 +332,47 @@ class SpamClassifierView(APIView):
                     elif part.get('mimeType') == 'text/plain':
                         return decode_base64(part['body'].get('data', ''))
                     elif part.get('mimeType', '').startswith('multipart'):
-                        # Recursive dive into nested multipart structures
                         nested = extract_parts(part)
                         if nested:
                             return nested
             elif payload.get('body', {}).get('data'):
-                # No parts, just one encoded body
                 content_type = payload.get('mimeType', '')
                 raw = decode_base64(payload['body']['data'])
                 return text_from_html(raw) if content_type == 'text/html' else raw
             return None
 
+        def extract_domains_from_text(text):
+            urls = re.findall(r'(https?://[^\s]+)', text)
+            domains = set()
+            for url in urls:
+                parsed = urlparse(url)
+                if parsed.hostname:
+                    domain = parsed.hostname.lower()
+                    if domain.startswith('www.'):
+                        domain = domain[4:]
+                    domains.add(domain)
+            return list(domains)
+
         try:
-            # Get subject if present
             headers = data.get('payload', {}).get('headers', [])
             for obj in headers:
                 if obj['name'] == 'Subject':
                     self.emailStruct['title'] = obj.get('value', '')
 
-            # Extract content recursively
             body = extract_parts(data['payload'])
             if body:
                 self.emailStruct['body'] = body
-            return body
+                domains = extract_domains_from_text(body)
+                self.emailStruct['links'] = domains
+                return {
+                    "body": body,
+                    "domains": domains
+                }
+            return None
 
         except Exception as e:
             print(f"Error while extracting email body: {str(e)}")
             return None
-
     
     def getEmailBody(self, messageID, access_token):
         url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageID}"
@@ -322,18 +392,40 @@ class SpamClassifierView(APIView):
         except KeyError:
             return {"error": "Invalid response format"}
         
+        
+    def processDomainUrls(self, urls):
+        """
+        Returns False if any domain in the list is found in DB with category_id=1 (Spam).
+        If domain is not in DB, it's considered legitimate (i.e., passes check).
+        """
+        for url in urls:
+            try:
+                domain_entry = domain.objects.filter(name__iexact=url).first()
+                if domain_entry:
+                    print("URL Match Found")
+                else:
+                    print("NO URL Match Found")
+                if domain_entry and domain_entry.category == 1:
+                    return False  # Spam domain found
+            except Exception as e:
+                print(f"Error checking domain '{url}': {e}")
+                continue
+        return True
+        
     def classifyEmail(self, mail_content):
         try:
-            # Preprocess the email content
-            processed_content = self.preprocessing(mail_content)
+            processed_content = self.preprocessing(mail_content['body'])
             prediction_result = self.model.predict(processed_content)
             classification = "spam" if prediction_result[0] > 0.5 else "legitimate"
-
+            
+            if len(mail_content['domains']) > 0:
+                is_safe = self.processDomainUrls(mail_content['domains'])
+                if not is_safe:
+                    classification="spam"
             # Call report generation
-            reportGenerationResponse = generateReport(mail_content,classification)
-            print(reportGenerationResponse)
+            reportGenerationResponse = generateReport(mail_content['body'],classification)
         
-            if reportGenerationResponse is not None:    
+            if reportGenerationResponse is not None:
                 data = json.loads(reportGenerationResponse['response'])
 
                 if classification != 'spam':
