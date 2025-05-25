@@ -22,7 +22,7 @@ from rest_framework import routers, serializers, viewsets
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     EmailsViewSet, ReportsViewSet, FAQsViewSet, AttachmentsViewSet, 
-    CategoryViewSet, LinksViewSet, ReportAttributesViewSet, SpamClassifierView, LoginView,LogoutView,DashboardView
+    CategoryViewSet, LinksViewSet, ReportAttributesViewSet, SpamClassifierView, LoginView,DeleteUser,LogoutView,DashboardView
 )
 
 
@@ -44,6 +44,7 @@ urlpatterns = [
     path('api/spam-classifier/',SpamClassifierView.as_view(),name='spam-classifier'),
     path('api/', include(router.urls)),
     path('api/auth/login', LoginView.as_view(), name='login'),
+    path('api/auth/delete-user', DeleteUser.as_view(), name='deleteUser'),
     path('api/auth/logout', LogoutView.as_view(), name='logout'),
     path('api/dashboard/',DashboardView.as_view(),name="dashboard")
     # path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
