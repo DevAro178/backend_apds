@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from main.models import Attachments, Category, Emails, FAQs, Links, ReportAttributes, Reports,domain
 from main.serializers import (
     AttachmentsSerializer, CategorySerializer, EmailsSerializer, FAQsSerializer,
-    LinksSerializer, ReportAttributesSerializer, ReportsSerializer
+    LinksSerializer, ReportAttributesSerializer, ReportsSerializer, DomainSerializer
 )
 from django.db.models import Count
 from rest_framework.decorators import action, permission_classes
@@ -30,6 +30,7 @@ from ..services.storeEmail import post as storeEmail
 from ..services.storeReport import post as storeReport
 from ..services.generateReport import generate as generateReport
 from ..services.storeEmail import getEmailBodyAgainstMessageID
+from .ipqs import IPQS
 
 
         
@@ -396,20 +397,38 @@ class SpamClassifierView(APIView):
     def processDomainUrls(self, urls):
         """
         Returns False if any domain in the list is found in DB with category_id=1 (Spam).
-        If domain is not in DB, it's considered legitimate (i.e., passes check).
+        If a domain is not in DB, it is checked using IPQS API and saved accordingly.
         """
+        ipqs = IPQS()
+        strictness = 0
+        additional_params = {'strictness': strictness}
+
         for url in urls:
             try:
                 domain_entry = domain.objects.filter(name__iexact=url).first()
+
+                # Case: domain is in DB and marked as spam
                 if domain_entry:
-                    print("URL Match Found")
-                else:
-                    print("NO URL Match Found")
-                if domain_entry and domain_entry.category == 1:
-                    return False  # Spam domain found
+                    if domain_entry.category_id == 1:
+                        return False
+                    continue  # It's legitimate, move to next
+
+                # Case: domain not in DB — check with IPQS
+                is_spam = ipqs.malicious_url_scanner_api(url, additional_params)
+                category_id = 1 if is_spam else 2
+
+                domain_data = {'name': url, 'category': category_id}
+                serializer = DomainSerializer(data=domain_data)
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+
+                if is_spam:
+                    return False
+
             except Exception as e:
-                print(f"Error checking domain '{url}': {e}")
+                print(f"[ERROR] Failed processing domain '{url}': {e}")
                 continue
+
         return True
         
     def classifyEmail(self, mail_content):
