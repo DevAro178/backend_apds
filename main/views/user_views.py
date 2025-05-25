@@ -40,9 +40,18 @@ class EmailsViewSet(viewsets.ModelViewSet):
     serializer_class = EmailsSerializer
     permission_classes = [IsAuthenticated]
 
-    # Get all emails for the logged-in user
     def get_queryset(self):
-        return Emails.objects.filter(user_id=self.request.user)
+        return Emails.objects.filter(user_id=self.request.user).order_by("-id")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+        
+        for idx, item in enumerate(data, start=1):
+            item["sid"] = idx
+
+        return Response(data)
 
     # Create a new email with attachments and links
     def create(self, request, *args, **kwargs):
