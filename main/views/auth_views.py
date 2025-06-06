@@ -11,6 +11,19 @@ from django.core.exceptions import ObjectDoesNotExist
 
 User = get_user_model()
 
+class DeleteUser(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user  # get current authenticated user
+
+        try:
+            user.delete()  # deletes the user and cascades related objects if set
+            return Response({"detail": "User deleted successfully."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
 class LoginView(APIView):
     permission_classes = [AllowAny]  # Allow any user to login
 
